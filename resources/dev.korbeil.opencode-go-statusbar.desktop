@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=OpenCode Go Statusbar
+Comment=OpenCode Go usage quota for your configured accounts
+Type=Application
+Icon=dev.korbeil.opencode-go-statusbar
+Exec=opencode-go-statusbar %F
+Terminal=false
+StartupNotify=true
+Categories=COSMIC
+Keywords=COSMIC;OpenCode;
+NoDisplay=true
+X-CosmicApplet=true
+X-CosmicHoverPopup=Auto
+MimeType=

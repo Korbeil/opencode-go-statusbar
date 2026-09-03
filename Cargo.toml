@@ -1,0 +1,33 @@
+[package]
+name = "opencode-go-statusbar"
+version = "0.1.0"
+edition = "2024"
+license = "MPL-2.0"
+description = "COSMIC panel applet showing OpenCode Go usage quota for one or more accounts"
+repository = "https://github.com/Korbeil/opencode-go-statusbar"
+
+[dependencies]
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["full"] }
+
+[dependencies.libcosmic]
+git = "https://github.com/pop-os/libcosmic.git"
+# See https://github.com/pop-os/libcosmic/blob/master/Cargo.toml for available features.
+features = [
+    # Applet support
+    "applet",
+    "applet-token",
+    # Uses cosmic-settings-daemon to watch for config file changes
+    "dbus-config",
+    # Support creating additional application windows.
+    "multi-window",
+    # Uses tokio as the executor for the runtime
+    "tokio",
+    # Add Wayland support to winit
+    "wayland",
+    # Windowing support for X11, Windows, Mac, & Redox
+    "winit",
+]
