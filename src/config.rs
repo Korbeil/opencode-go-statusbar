@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use cosmic::cosmic_config::{self, CosmicConfigEntry, cosmic_config_derive::CosmicConfigEntry};
 use serde::{Deserialize, Serialize};
 

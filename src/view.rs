@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use std::sync::LazyLock;
 
 use chrono::Utc;
@@ -16,6 +18,20 @@ use crate::usage::{FetchError, WindowQuota};
 
 const WARNING_COLOR: Color = Color::from_rgb8(0xE6, 0x8A, 0x2E);
 const DANGER_COLOR: Color = Color::from_rgb8(0xE0, 0x4F, 0x3F);
+const OK_COLOR: Color = Color::from_rgb8(0x3F, 0xC1, 0x5A);
+
+/// Gradient for the panel labels: red at 0% remaining, orange at 50%, green
+/// at 100%, linearly interpolated in between.
+#[allow(clippy::cast_possible_truncation)]
+fn remaining_color(remaining: f64) -> Color {
+    let (from, to, t) = if remaining <= 50.0 {
+        (DANGER_COLOR, WARNING_COLOR, remaining / 50.0)
+    } else {
+        (WARNING_COLOR, OK_COLOR, (remaining - 50.0) / 50.0)
+    };
+    let mix = |a: f32, b: f32| a + (b - a) * t as f32;
+    Color::from_rgb(mix(from.r, to.r), mix(from.g, to.g), mix(from.b, to.b))
+}
 
 static AUTOSIZE_MAIN_ID: LazyLock<widget::Id> =
     LazyLock::new(|| widget::Id::new("opencode-go-autosize-main"));
@@ -209,8 +225,7 @@ fn account_label<'a>(
         Some(Ok(usage)) if usage.blocked() => ("blocked".to_string(), Some(DANGER_COLOR)),
         Some(Ok(usage)) => {
             let remaining = usage.worst_remaining().unwrap_or(100.0);
-            let color = (remaining < 20.0).then_some(WARNING_COLOR);
-            (format!("{:.0}%", remaining.round()), color)
+            (format!("{:.0}%", remaining.round()), Some(remaining_color(remaining)))
         }
     };
 
