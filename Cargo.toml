@@ -15,6 +15,10 @@ tokio = { version = "1", features = ["full"] }
 
 [dependencies.libcosmic]
 git = "https://github.com/pop-os/libcosmic.git"
+# Pinned to the libcosmic snapshot contemporary with the installed
+# cosmic-panel (0.1.0~1785272608, built 2026-07-28) so the applet's
+# layer-shell client matches the panel's expectations.
+rev = "0ca1b78"
 # See https://github.com/pop-os/libcosmic/blob/master/Cargo.toml for available features.
 features = [
     # Applet support

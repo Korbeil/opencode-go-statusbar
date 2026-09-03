@@ -1,9 +1,13 @@
+use std::sync::LazyLock;
+
 use chrono::Utc;
 use cosmic::applet::cosmic_panel_config::PanelAnchor;
 use cosmic::iced::core::Alignment;
 use cosmic::iced::{Color, Length};
 use cosmic::theme::{Button, Text};
-use cosmic::widget::{self, button, column, icon, progress_bar, row, segmented_button, text};
+use cosmic::widget::{
+    self, autosize, button, column, icon, progress_bar, row, segmented_button, text,
+};
 use cosmic::Element;
 
 use crate::app::{AccountState, Message, OpenCodeGoApplet};
@@ -13,6 +17,9 @@ use crate::usage::{FetchError, WindowQuota};
 const WARNING_COLOR: Color = Color::from_rgb8(0xE6, 0x8A, 0x2E);
 const DANGER_COLOR: Color = Color::from_rgb8(0xE0, 0x4F, 0x3F);
 
+static AUTOSIZE_MAIN_ID: LazyLock<widget::Id> =
+    LazyLock::new(|| widget::Id::new("opencode-go-autosize-main"));
+
 /// The applet button shown in the panel: icon followed by one label per account.
 pub fn panel(app: &OpenCodeGoApplet) -> Element<'_, Message> {
     let is_horizontal = matches!(
@@ -21,16 +28,14 @@ pub fn panel(app: &OpenCodeGoApplet) -> Element<'_, Message> {
     );
     let suggested = app.core.applet.suggested_size(true);
     let padding = app.core.applet.suggested_padding(true);
-    let (horizontal_padding, vertical_padding) = if is_horizontal {
-        (padding.0, padding.1)
-    } else {
-        (padding.1, padding.0)
-    };
 
     let mut children: Vec<Element<'_, Message>> = vec![icon::from_name(ICON_NAME)
         .size(suggested.0)
         .into()];
-    for state in &app.states {
+    for (index, state) in app.states.iter().enumerate() {
+        if index > 0 {
+            children.push(label_separator(is_horizontal, suggested));
+        }
         children.push(account_label(app, state));
     }
 
@@ -46,11 +51,20 @@ pub fn panel(app: &OpenCodeGoApplet) -> Element<'_, Message> {
             .into()
     };
 
-    button::custom(content)
+    // Padding is only applied along the panel's major axis, and the view is
+    // wrapped in `autosize` so the applet window resizes to fit the content:
+    // without it the window stays at the suggested icon size and the labels
+    // get clipped (the applet is then clickable but shows nothing).
+    let button = button::custom(content)
         .on_press_down(Message::TogglePopup)
         .class(Button::AppletIcon)
-        .padding([vertical_padding, horizontal_padding])
-        .into()
+        .padding(if is_horizontal {
+            [0.0, f32::from(padding.0)]
+        } else {
+            [f32::from(padding.0), 0.0]
+        });
+
+    autosize::autosize(button, AUTOSIZE_MAIN_ID.clone()).into()
 }
 
 /// Popup listing every configured account with its three quota windows.
@@ -136,11 +150,19 @@ pub fn context(app: &OpenCodeGoApplet) -> Element<'_, Message> {
     }
     list = list.add(accounts_section);
 
+    // The segmented control defaults to `width: Fill`; inside the shrink-to-fit
+    // control slot of `settings::item` it would collapse to a sliver, so it
+    // gets its own full-width row instead.
     list = list.add(widget::settings::section().title("General").add(
-        widget::settings::item(
-            "Refresh interval",
-            segmented_button::horizontal(&app.interval_model).on_activate(Message::IntervalSelected),
-        ),
+        column::with_children(vec![
+            text::caption("Refresh interval").into(),
+            segmented_button::horizontal(&app.interval_model)
+                .on_activate(Message::IntervalSelected)
+                .width(Length::Fill)
+                .into(),
+        ])
+        .spacing(4)
+        .width(Length::Fill),
     ));
 
     let footer = row::with_children(vec![
@@ -158,6 +180,21 @@ pub fn context(app: &OpenCodeGoApplet) -> Element<'_, Message> {
     app.core
         .applet
         .popup_container(column::with_children(vec![list.into(), footer.into()]).width(Length::Fill))
+        .into()
+}
+
+/// A thin themed line separating account labels, reading like a `|`.
+fn label_separator(is_horizontal: bool, suggested: (u16, u16)) -> Element<'static, Message> {
+    let rule = if is_horizontal {
+        Element::<'static, Message>::from(widget::divider::vertical::default())
+    } else {
+        Element::<'static, Message>::from(widget::divider::horizontal::default())
+    };
+    widget::container(rule)
+        .width(Length::Fixed(if is_horizontal { 1.0 } else { f32::from(suggested.0) }))
+        .height(Length::Fixed(if is_horizontal { f32::from(suggested.1) } else { 1.0 }))
+        .align_x(Alignment::Center)
+        .align_y(Alignment::Center)
         .into()
 }
 
@@ -193,8 +230,16 @@ fn account_label<'a>(
 
 #[allow(clippy::cast_possible_truncation)]
 fn quota_item<'a>(label: &'static str, quota: Option<WindowQuota>) -> Element<'a, Message> {
+    // Fixed width so every quota row's bar occupies identical bounds; the
+    // control slot of `settings::item` shrinks to the natural content width,
+    // which would otherwise misalign bars whenever a reset caption is long.
+    const CONTROL_WIDTH: f32 = 180.0;
+
     let control: Element<'a, Message> = match quota {
-        None => text("—").into(),
+        None => widget::container(text("—"))
+            .width(Length::Fixed(CONTROL_WIDTH))
+            .align_x(Alignment::Start)
+            .into(),
         Some(quota) => {
             let remaining = quota.remaining_percent();
             let color = if quota.blocked() {
@@ -210,10 +255,12 @@ fn quota_item<'a>(label: &'static str, quota: Option<WindowQuota>) -> Element<'a
                 percent_text = percent_text.class(Text::Color(color));
             }
 
+            // The bar shows the used quota: full (red) when exhausted, empty
+            // when untouched; the number keeps showing what remains.
             let mut controls = column::with_children(vec![
                 percent_text.into(),
-                progress_bar::determinate_linear((remaining / 100.0) as f32)
-                    .width(Length::Fixed(110.0))
+                progress_bar::determinate_linear((quota.used_percent / 100.0) as f32)
+                    .width(Length::Fill)
                     .into(),
             ])
             .spacing(4);
@@ -222,7 +269,7 @@ fn quota_item<'a>(label: &'static str, quota: Option<WindowQuota>) -> Element<'a
             if !resets.is_empty() {
                 controls = controls.push(text::caption(resets));
             }
-            controls.into()
+            controls.width(Length::Fixed(CONTROL_WIDTH)).into()
         }
     };
 
