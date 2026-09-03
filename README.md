@@ -19,6 +19,17 @@ remaining usage quota of one or more **OpenCode Go** accounts.
   (`~/.config/dev.korbeil.opencode-go-statusbar/`) and hot-reloaded when the file
   changes on disk
 
+## Screenshots
+
+The applet button in the panel (one label per account, `|`-separated) with the
+quota popup open — bars show the used quota, numbers what remains:
+
+![Applet button and quota popup](assets/panel-popup.png)
+
+The settings popup (accounts and refresh interval):
+
+![Settings popup](assets/settings.png)
+
 ## The OpenCode Go API
 
 The applet queries OpenCode's first-party (but undocumented) usage endpoint:
