@@ -11,7 +11,7 @@ use cosmic::iced::{Limits, Subscription};
 use cosmic::widget::segmented_button;
 use cosmic::{Element, widget};
 
-use crate::config::{Account, Config, APP_ID};
+use crate::config::{Account, Config, Provider, APP_ID};
 use crate::usage::{self, FetchError, Usage};
 use crate::view;
 
@@ -37,6 +37,8 @@ pub struct OpenCodeGoApplet {
     pub config: Config,
     /// Per-account fetch results, indexed like `config.accounts`.
     pub states: Vec<AccountState>,
+    /// Per-account provider selectors, indexed like `config.accounts`.
+    pub provider_models: Vec<segmented_button::Model<segmented_button::SingleSelect>>,
     pub interval_model: segmented_button::Model<segmented_button::SingleSelect>,
 }
 
@@ -53,6 +55,7 @@ pub enum Message {
     AccountKey(usize, String),
     AddAccount,
     RemoveAccount(usize),
+    AccountProvider(usize, segmented_button::Entity),
     IntervalSelected(segmented_button::Entity),
 }
 
@@ -73,10 +76,58 @@ fn build_interval_model(
     model
 }
 
+/// One provider selector for the settings: two entries, the account's current
+/// provider preselected.
+fn build_provider_model(
+    current: Provider,
+) -> segmented_button::Model<segmented_button::SingleSelect> {
+    let mut builder = segmented_button::Model::<segmented_button::SingleSelect>::builder();
+    builder = builder.insert(|b| b.text("OpenCode Go").data(Provider::OpenCodeGo));
+    builder = builder.insert(|b| b.text("Claude").data(Provider::Claude));
+    let mut model = builder.build();
+    let position = usize::from(current == Provider::Claude);
+    model.activate_position(u16::try_from(position).unwrap_or(0));
+    model
+}
+
 impl OpenCodeGoApplet {
+    /// Applies a provider selection from an account's segmented control:
+    /// persists the switch and refreshes so the account's data comes from
+    /// its new provider.
+    fn select_provider(
+        &mut self,
+        index: usize,
+        entity: segmented_button::Entity,
+    ) -> Task<Message> {
+        let Some(provider) = self
+            .provider_models
+            .get(index)
+            .and_then(|model| model.data::<Provider>(entity))
+            .copied()
+        else {
+            return Task::none();
+        };
+        if let Some(account) = self.config.accounts.get_mut(index)
+            && account.provider != provider
+        {
+            account.provider = provider;
+            self.persist_config();
+            return self.start_refresh();
+        }
+        Task::none()
+    }
+
     fn sync_states(&mut self) {
         self.states
             .resize_with(self.config.accounts.len(), AccountState::default);
+        // Rebuilt wholesale so selection always mirrors the persisted config,
+        // surviving hot reloads and account add/remove.
+        self.provider_models = self
+            .config
+            .accounts
+            .iter()
+            .map(|account| build_provider_model(account.provider))
+            .collect();
     }
 
     fn persist_config(&self) {
@@ -99,20 +150,20 @@ impl OpenCodeGoApplet {
         for state in &mut self.states {
             state.fetching = true;
         }
-        let accounts: Vec<(usize, String)> = self
+        let accounts: Vec<(usize, Provider, String)> = self
             .config
             .accounts
             .iter()
             .enumerate()
-            .map(|(index, account)| (index, account.key.clone()))
+            .map(|(index, account)| (index, account.provider, account.key.clone()))
             .collect();
 
         cosmic::task::future(async move {
             let client = usage::client();
             let results = cosmic::iced::futures::future::join_all(
-                accounts.into_iter().map(|(index, key)| {
+                accounts.into_iter().map(|(index, provider, key)| {
                     let client = client.clone();
-                    async move { (index, usage::fetch_usage(&client, &key).await) }
+                    async move { (index, usage::fetch_usage(&client, provider, &key).await) }
                 }),
             )
             .await;
@@ -161,6 +212,7 @@ impl cosmic::Application for OpenCodeGoApplet {
             context: None,
             config,
             states: Vec::new(),
+            provider_models: Vec::new(),
             interval_model,
         };
         app.sync_states();
@@ -245,11 +297,15 @@ impl cosmic::Application for OpenCodeGoApplet {
                 self.persist_config();
                 return self.start_refresh();
             }
+            Message::AccountProvider(index, entity) => {
+                return self.select_provider(index, entity);
+            }
             Message::AddAccount => {
                 let name = format!("Account {}", self.config.accounts.len() + 1);
                 self.config.accounts.push(Account {
                     name,
                     key: String::new(),
+                    provider: Provider::default(),
                 });
                 self.sync_states();
                 self.persist_config();
@@ -257,6 +313,7 @@ impl cosmic::Application for OpenCodeGoApplet {
             Message::RemoveAccount(index) => {
                 self.config.accounts.remove(index);
                 self.states.remove(index);
+                self.provider_models.remove(index);
                 self.persist_config();
             }
             Message::IntervalSelected(entity) => {

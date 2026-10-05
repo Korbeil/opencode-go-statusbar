@@ -13,7 +13,7 @@ use cosmic::widget::{
 use cosmic::Element;
 
 use crate::app::{AccountState, Message, OpenCodeGoApplet};
-use crate::config::ICON_NAME;
+use crate::config::{ICON_NAME, Provider};
 use crate::usage::{FetchError, WindowQuota};
 
 const WARNING_COLOR: Color = Color::from_rgb8(0xE6, 0x8A, 0x2E);
@@ -98,7 +98,8 @@ pub fn popup(app: &OpenCodeGoApplet) -> Element<'_, Message> {
         );
     } else {
         for (account, state) in app.config.accounts.iter().zip(&app.states) {
-            let mut section = widget::settings::section().title(account.name.clone());
+            let mut section =
+                widget::settings::section().title(format!("{} · {}", account.name, account.provider.label()));
             match &state.usage {
                 None => {
                     section = section.add(status_row(if state.fetching {
@@ -111,10 +112,13 @@ pub fn popup(app: &OpenCodeGoApplet) -> Element<'_, Message> {
                     section = section.add(error_row(err));
                 }
                 Some(Ok(usage)) => {
-                    section = section
-                        .add(quota_item("5 hours", usage.rolling))
-                        .add(quota_item("Weekly", usage.weekly))
-                        .add(quota_item("Monthly", usage.monthly));
+                    section = section.add(quota_item("5 hours", usage.rolling));
+                    section = section.add(quota_item("Weekly", usage.weekly));
+                    if let Some(monthly) = usage.monthly {
+                        // OpenCode Go only: the Claude endpoint has no
+                        // monthly window, so the row disappears entirely.
+                        section = section.add(quota_item("Monthly", Some(monthly)));
+                    }
                 }
             }
             list = list.add(section);
@@ -146,23 +150,35 @@ pub fn context(app: &OpenCodeGoApplet) -> Element<'_, Message> {
         let name_input = widget::text_input("Name", &account.name)
             .on_input(move |value| Message::AccountName(index, value))
             .width(Length::Fill);
-        let key_input = widget::text_input("API key", &account.key)
+        let key_input = widget::text_input(key_placeholder(account.provider), &account.key)
             .on_input(move |value| Message::AccountKey(index, value))
             .password()
             .width(Length::Fill);
         let remove = button::icon(icon::from_name("user-trash-symbolic"))
             .on_press(Message::RemoveAccount(index));
+
+        // Third row: which subscription the account bills against. The same
+        // segmented widget as the interval picker; the model is owned by the
+        // app (see `build_provider_model`) so the selection follows the
+        // persisted config across hot reloads and account changes.
+        let provider_model = &app.provider_models[index];
+
         accounts_section = accounts_section.add(
             column::with_children(vec![
                 row::with_children(vec![name_input.into(), remove.into()]).spacing(8).into(),
                 key_input.into(),
+                segmented_button::horizontal(provider_model)
+                    .on_activate(move |entity| Message::AccountProvider(index, entity))
+                    .width(Length::Fill)
+                    .into(),
             ])
             .spacing(4),
         );
     }
     if app.config.accounts.is_empty() {
-        accounts_section = accounts_section
-            .add(status_row("No accounts configured yet. Add one below with your OpenCode Go API key."));
+        accounts_section = accounts_section.add(status_row(
+            "No accounts configured yet. Add one below with your OpenCode Go or Claude credentials.",
+        ));
     }
     list = list.add(accounts_section);
 
@@ -325,4 +341,14 @@ fn error_row(error: &FetchError) -> Element<'_, Message> {
             .width(Length::Fill),
     )
     .into()
+}
+
+/// Placeholder for the credentials input, per provider. For Claude the field
+/// may stay empty: the applet then reads the live OAuth token from Claude
+/// Code's credentials file.
+fn key_placeholder(provider: Provider) -> &'static str {
+    match provider {
+        Provider::OpenCodeGo => "API key",
+        Provider::Claude => "OAuth token (empty = read from Claude Code)",
+    }
 }

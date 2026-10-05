@@ -6,10 +6,38 @@ use serde::{Deserialize, Serialize};
 pub const APP_ID: &str = "dev.korbeil.opencode-go-statusbar";
 pub const ICON_NAME: &str = "dev.korbeil.opencode-go-statusbar-symbolic";
 
+/// Which subscription an account authenticates against.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub enum Provider {
+    /// An [OpenCode Go](https://opencode.ai/docs/go/) subscription, keyed by
+    /// an API key from <https://opencode.ai/auth>.
+    #[default]
+    #[serde(rename = "opencode-go")]
+    OpenCodeGo,
+    /// A Claude (Pro/Max) subscription, keyed by the Claude Code OAuth token
+    /// from `~/.claude/.credentials.json`.
+    #[serde(rename = "claude")]
+    Claude,
+}
+
+impl Provider {
+    /// Human-readable name used in UI labels.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::OpenCodeGo => "OpenCode Go",
+            Self::Claude => "Claude",
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct Account {
     pub name: String,
     pub key: String,
+    /// Which subscription this account belongs to; defaults to
+    /// `Provider::OpenCodeGo` when deserializing older configs.
+    #[serde(default)]
+    pub provider: Provider,
 }
 
 #[derive(Clone, Debug, CosmicConfigEntry, Eq, PartialEq)]
@@ -45,5 +73,29 @@ impl Config {
                 Self::default()
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn provider_serializes_stable_names() {
+        assert_eq!(
+            serde_json::to_string(&Provider::OpenCodeGo).unwrap(),
+            r#""opencode-go""#
+        );
+        assert_eq!(
+            serde_json::to_string(&Provider::Claude).unwrap(),
+            r#""claude""#
+        );
+    }
+
+    #[test]
+    fn accounts_without_provider_default_to_opencode_go() {
+        let account: Account =
+            serde_json::from_str(r#"{"name":"work","key":"sk-…"}"#).unwrap();
+        assert_eq!(account.provider, Provider::OpenCodeGo);
     }
 }
