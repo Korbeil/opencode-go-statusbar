@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use std::env;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -228,9 +228,18 @@ fn resolve_token(pasted: &str) -> Result<String, FetchError> {
 /// Reads the OAuth access token from Claude Code's credentials file
 /// (`$CLAUDE_CONFIG_DIR/.credentials.json`, default `~/.claude/`).
 fn credentials_path() -> PathBuf {
-    let dir = env::var_os("CLAUDE_CONFIG_DIR")
-        .filter(|value| !value.is_empty())
-        .map_or_else(home_dir, PathBuf::from);
+    let config_dir = env::var_os("CLAUDE_CONFIG_DIR").filter(|value| !value.is_empty());
+    credentials_path_for(&home_dir(), config_dir.as_deref())
+}
+
+/// `credentials_path()` minus the environment lookups, so the `$HOME` default
+/// (`~/.claude/.credentials.json`) and the `CLAUDE_CONFIG_DIR` override stay
+/// unit-testable.
+fn credentials_path_for(home: &Path, config_dir: Option<&std::ffi::OsStr>) -> PathBuf {
+    let dir = match config_dir {
+        Some(dir) if !dir.is_empty() => PathBuf::from(dir),
+        _ => home.join(".claude"),
+    };
     dir.join(CLAUDE_CREDENTIALS_FILE)
 }
 
@@ -554,6 +563,29 @@ mod tests {
         assert_eq!(
             resolve_token("  sk-ant-oat01-pasted  ").unwrap(),
             "sk-ant-oat01-pasted"
+        );
+    }
+
+    #[test]
+    fn credentials_path_defaults_to_claude_dir_in_home() {
+        let home = Path::new("/home/example");
+        assert_eq!(
+            credentials_path_for(home, None),
+            PathBuf::from("/home/example/.claude/.credentials.json")
+        );
+        // An empty CLAUDE_CONFIG_DIR must not swallow the default either.
+        assert_eq!(
+            credentials_path_for(home, Some(std::ffi::OsStr::new(""))),
+            PathBuf::from("/home/example/.claude/.credentials.json")
+        );
+    }
+
+    #[test]
+    fn credentials_path_honors_config_dir_override() {
+        let home = Path::new("/home/example");
+        assert_eq!(
+            credentials_path_for(home, Some(std::ffi::OsStr::new("/custom/claude"))),
+            PathBuf::from("/custom/claude/.credentials.json")
         );
     }
 
